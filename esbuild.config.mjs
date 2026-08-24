@@ -38,8 +38,10 @@ const out = positionalArgs[0] || ".";
 const outfile = out + "/main.js";
 const tld = staging ? "dev" : "md";
 
-const apiUrl = `https://api.system3.${tld}`;
-const authUrl = `https://auth.system3.${tld}`;
+const apiUrl = process.env.RELAY_FORK_API_URL || `https://api.system3.${tld}`;
+const authUrl = process.env.RELAY_FORK_AUTH_URL || `https://auth.system3.${tld}`;
+const repository = process.env.RELAY_FORK_REPOSITORY || "No-Instructions/Relay";
+const operatorEmail = process.env.RELAY_FORK_OPERATOR || "";
 const healthUrl = `${apiUrl}/health?version=${gitTag}`;
 console.log("git tag:", gitTag);
 console.log("health URL", healthUrl);
@@ -181,7 +183,8 @@ const context = await esbuild.context({
 		HEALTH_URL: `"${healthUrl}"`,
 		API_URL: `"${apiUrl}"`,
 		AUTH_URL: `"${authUrl}"`,
-		REPOSITORY: `"No-Instructions/Relay"`,
+		REPOSITORY: `"${repository}"`,
+		OPERATOR_EMAIL: `"${operatorEmail}"`,
 	},
 	treeShaking: true,
 	outfile,

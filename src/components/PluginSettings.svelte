@@ -13,6 +13,7 @@
 	import { handleServerError } from "../utils/toastStore";
 	import { Platform } from "obsidian";
 	import Announcement from "./Announcement.svelte";
+	import { isOperatorEmail } from "src/operator";
 
 	interface RelayEventDetail {
 		relay: Relay;
@@ -46,6 +47,9 @@
 	export let plugin: Live;
 	export let path: string | undefined = undefined;
 	const app = plugin.app;
+	const lm = plugin.loginManager;
+	// Non-operators get a minimal settings surface: account + version only.
+	$: operator = isOperatorEmail($lm.user?.email);
 	const relayManager = plugin.relayManager;
 	const relayRoles = relayManager.relayRoles;
 	const relays = relayManager.relays;
@@ -267,13 +271,19 @@
 	}
 </script>
 
-{#if currentRelay || sharedFolder || remoteFolder}
-	<ModalSettingsNav on:goBack={handleGoBack}></ModalSettingsNav>
-{:else if !Platform.isMobile}
-	<Announcement {plugin} />
-{/if}
-<div class="vertical-tab-content">
-	{#if remoteFolder}
+{#if !operator}
+	<!-- Minimal settings for non-operators: account section only. -->
+	<div class="vertical-tab-content">
+		<LoggedIn {plugin} />
+	</div>
+{:else}
+	{#if currentRelay || sharedFolder || remoteFolder}
+		<ModalSettingsNav on:goBack={handleGoBack}></ModalSettingsNav>
+	{:else if !Platform.isMobile}
+		<Announcement {plugin} />
+	{/if}
+	<div class="vertical-tab-content">
+		{#if remoteFolder}
 		<ManageRemoteFolder
 			{plugin}
 			{remoteFolder}
@@ -318,11 +328,12 @@
 			></Relays>
 		</LoggedIn>
 	{/if}
-</div>
+	</div>
+{/if}
 
 <ToastManager />
 
-{#if plugin.manifest.version !== plugin.version}
+{#if !operator || plugin.manifest.version !== plugin.version}
 	<span class="relay-version">
 		{plugin.version}
 	</span>

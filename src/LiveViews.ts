@@ -64,7 +64,7 @@ export function getConnectionManager(
 ): LiveViewManager | null {
 	const fileInfo = editor.state.field(editorInfoField, false);
 	return (
-		(fileInfo as any)?.app?.plugins?.plugins?.["system3-relay"]?._liveViews ??
+		(fileInfo as any)?.app?.plugins?.plugins?.["pictureframes-relay"]?._liveViews ??
 		null
 	);
 }
@@ -378,38 +378,6 @@ export class RelayCanvasView implements S3View {
 			this.plugin = new CanvasPlugin(this._parent, this);
 		}
 
-		if (!this._awarenessPlugin) {
-			const viewEl = this.view.containerEl;
-			this._awarenessPlugin = new AwarenessViewPlugin(
-				{
-					view: this.view,
-					doc: this.canvas,
-					resolveAnchor: (containerEl) => {
-						const viewContent = containerEl.querySelector(
-							".view-content",
-						) as HTMLElement | null;
-						return viewContent
-							? { anchor: viewContent, position: "afterbegin" }
-							: null;
-					},
-					vertical: true,
-					configureContainer: (el) => {
-						const controls = viewEl.querySelector(
-							".canvas-controls",
-						) as HTMLElement | null;
-						const gap = 12;
-						const top = controls
-							? controls.offsetTop + controls.offsetHeight + gap
-							: gap;
-						el.style.top = `${top}px`;
-						const isMobile =
-							viewEl.ownerDocument.body.classList.contains("is-mobile");
-						el.style.right = isMobile ? "12px" : "6px";
-					},
-				},
-				this._parent.sharedFolders.manager.users,
-			);
-		}
 
 		return new Promise((resolve, reject) => {
 			return trackPromise(
@@ -895,26 +863,6 @@ export class LiveView<ViewType extends TextFileView>
 
 		this.setConnectionDot();
 
-		if (isLiveMd(this)) {
-			if (!this._awarenessPlugin) {
-				this._awarenessPlugin = new AwarenessViewPlugin(
-					{
-						view: this.view,
-						doc: this.document,
-						resolveAnchor: (containerEl) =>
-							resolveMarkdownAwarenessAnchor(
-								containerEl,
-								this.view.getMode(),
-							),
-						variantClass: "user-awareness-container--markdown",
-						getEditor: () => this.view.editor,
-					},
-					this._parent.sharedFolders.manager.users,
-				);
-			} else {
-				this._awarenessPlugin.refresh();
-			}
-		}
 
 		return new Promise((resolve, reject) => {
 			return trackPromise(
@@ -1821,8 +1769,6 @@ export class LiveViewManager {
 		this.extensions.push([
 			HSMEditorPlugin,
 			LiveNode,
-			yRemoteSelectionsTheme,
-			yRemoteSelections,
 			attributionFilterField,
 			userAttributionTheme,
 			userAttributionPlugin,

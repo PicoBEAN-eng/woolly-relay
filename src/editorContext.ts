@@ -19,7 +19,7 @@ interface RelayPlugin {
 
 export function getRelayPlugin(editor: EditorView): RelayPlugin | null {
 	const fileInfo = editor.state.field(editorInfoField, false);
-	return (fileInfo as any)?.app?.plugins?.plugins?.["system3-relay"] ?? null;
+	return (fileInfo as any)?.app?.plugins?.plugins?.["pictureframes-relay"] ?? null;
 }
 
 export function getSharedFolders(editor: EditorView): SharedFolders | null {

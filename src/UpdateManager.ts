@@ -81,8 +81,8 @@ export class UpdateManager extends Observable<UpdateManager> {
 		private releaseSettings: NamespacedSettings<ReleaseSettings>,
 	) {
 		super("UpdateManager");
-		this.githubReleases = new LocalStorage("system3-relay/releases");
-		this.releaseChannels = new LocalStorage("system3-relay/releaseChannels");
+		this.githubReleases = new LocalStorage("pictureframes-relay/releases");
+		this.releaseChannels = new LocalStorage("pictureframes-relay/releaseChannels");
 	}
 
 	public get releases(): Release[] {
@@ -140,8 +140,7 @@ export class UpdateManager extends Observable<UpdateManager> {
 
 	private async fetchLatestRelease(): Promise<Release | null> {
 		try {
-			const repoOwner = "No-Instructions";
-			const repoName = "Relay";
+			const [repoOwner, repoName] = REPOSITORY.split("/");
 			const latestUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
 
 			this.debug(`Fetching latest release from: ${latestUrl}`);
@@ -322,8 +321,7 @@ export class UpdateManager extends Observable<UpdateManager> {
 		branch = "main",
 	): Promise<Manifest | null> {
 		try {
-			const repoOwner = "No-Instructions";
-			const repoName = "Relay";
+			const [repoOwner, repoName] = REPOSITORY.split("/");
 			const fileUrl = `https://raw.githubusercontent.com/${repoOwner}/${repoName}/${branch}/${path}`;
 
 			this.debug(`Fetching ${fileUrl}`);

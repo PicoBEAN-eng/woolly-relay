@@ -10,13 +10,13 @@ import type { User as SignedInUser } from "./User";
 export type { Api, ApiV0, RelayEvent, User };
 
 export const API_UNLOADED_ERROR =
-	'Relay plugin unloaded; resolve app.plugins.plugins["system3-relay"]?.api after the next system3-relay:api-ready signal';
+	'Relay plugin unloaded; resolve app.plugins.plugins["pictureframes-relay"]?.api after the next pictureframes-relay:api-ready signal';
 
 type UserRecord = RelayUser | SignedInUser;
 type WorkspaceEvents = {
-	trigger(name: "system3-relay:v0:users", event: RelayEvent<User>): void;
+	trigger(name: "pictureframes-relay:v0:users", event: RelayEvent<User>): void;
 	trigger(
-		name: "system3-relay:v0:current-user",
+		name: "pictureframes-relay:v0:current-user",
 		event: RelayEvent<User | null>,
 	): void;
 };
@@ -94,11 +94,11 @@ export interface PublicApiHandle {
 /** Publish the API before notifying consumers to resolve it from the plugin. */
 export function publishPublicApi(
 	plugin: { api?: Api },
-	workspace: { trigger(name: "system3-relay:api-ready"): void },
+	workspace: { trigger(name: "pictureframes-relay:api-ready"): void },
 	api: Api,
 ): void {
 	plugin.api = api;
-	workspace.trigger("system3-relay:api-ready");
+	workspace.trigger("pictureframes-relay:api-ready");
 }
 
 export function createPublicApi(
@@ -132,7 +132,7 @@ export function createPublicApi(
 		for (const [id, record] of after) {
 			const previous = before.get(id);
 			if (!previous || !usersEqual(previous, record)) {
-				workspace.trigger("system3-relay:v0:users", {
+				workspace.trigger("pictureframes-relay:v0:users", {
 					action: previous ? "update" : "create",
 					record: clone(record),
 				});
@@ -140,7 +140,7 @@ export function createPublicApi(
 		}
 		for (const [id, record] of before) {
 			if (!after.has(id)) {
-				workspace.trigger("system3-relay:v0:users", {
+				workspace.trigger("pictureframes-relay:v0:users", {
 					action: "delete",
 					record: clone(record),
 				});
@@ -153,7 +153,7 @@ export function createPublicApi(
 		const next = readCurrentUser();
 		if (currentUsersEqual(next, state.currentUser)) return;
 		state.currentUser = next;
-		workspace.trigger("system3-relay:v0:current-user", {
+		workspace.trigger("pictureframes-relay:v0:current-user", {
 			action: "update",
 			record: clone(next),
 		});

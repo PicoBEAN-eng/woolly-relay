@@ -1,9 +1,8 @@
 <script lang="ts">
-	import Discord from "./Discord.svelte";
 	import { Platform } from "obsidian";
 
 	const helpText =
-		"We require sign-in because your vault needs to communicate securely with Relay servers for syncing. Using an identity provider helps to prevent spam accounts and ensures secure authentication.";
+		"Signing in lets your vault communicate securely with the Pictureframes sync server. Signing in with Google keeps authentication simple and secure.";
 
 	let isVisible = false;
 	let isMobile = false;
@@ -62,24 +61,11 @@
 	</div>
 </div>
 
-<!-- Discord link -->
-<div class="footer">
-	<a href="https://discord.system3.md" class="discord-link">
-		<Discord />
-		Join the project on Discord
-	</a>
-</div>
-
 <style>
 	.help-section {
 		width: 100%;
 		padding: 0 2rem;
 		margin-bottom: 2rem;
-	}
-	.footer {
-		padding: 0 2rem;
-		margin-bottom: 2rem;
-		text-align: center;
 	}
 	.help-container {
 		position: relative;
@@ -157,14 +143,5 @@
 		transform: rotate(45deg);
 		top: -5px;
 		right: 40px;
-	}
-	.discord-link {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		color: var(--text-muted);
-		font-size: 0.875rem;
-		margin: 0;
 	}
 </style>

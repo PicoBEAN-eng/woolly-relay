@@ -15,7 +15,8 @@ import {
 	type TAbstractFile,
 } from "obsidian";
 import { Platform } from "obsidian";
-import { relative } from "path-browserify";
+import { join, relative } from "path-browserify";
+import { LocalStorage } from "./LocalStorage";
 import { SharedFolder } from "./SharedFolder";
 import type { SharedFolderSettings } from "./SharedFolder";
 import type { MetadataBridge } from "./editorContext";
@@ -32,6 +33,7 @@ import { MetadataHealthSidebarNoticeMount } from "./ui/MetadataHealthSidebarNoti
 import { ResourceMeterMount } from "./ui/ResourceMeter";
 import { LiveSettingsTab } from "./ui/SettingsTab";
 import { LoginManager, type LoginSettings } from "./LoginManager";
+import { isOperatorEmail } from "./operator";
 import { EndpointConfigModal } from "./ui/EndpointConfigModal";
 import {
 	curryLog,
@@ -48,6 +50,7 @@ import { SavingFlagPolyfill } from "./SavingFlagPolyfill";
 import { LiveTokenStore } from "./LiveTokenStore";
 import NetworkStatus from "./NetworkStatus";
 import { RelayManager } from "./RelayManager";
+import { MirrorSync } from "./MirrorSync";
 import { DefaultTimeProvider, type TimeProvider } from "./TimeProvider";
 import { auditTeardown } from "./observable/Observable";
 import { PromiseTracker, setActiveTracker, trackPromise } from "./trackPromise";
@@ -165,6 +168,7 @@ export default class Live extends Plugin {
 	private metadataHealthSidebarNotice: MetadataHealthSidebarNoticeMount | null = null;
 	private resourceMeter: ResourceMeterMount | null = null;
 	relayManager!: RelayManager;
+	mirrorSync: MirrorSync | null = null;
 	deviceManager!: DeviceManager;
 	private relayDebugAPI!: RelayDebugAPI;
 	private metadataHealth: MetadataHealth | null = null;
@@ -642,7 +646,7 @@ export default class Live extends Plugin {
 		}
 
 		this.settingsTab = new LiveSettingsTab(this.app, this);
-		this.addRibbonIcon("satellite", "Relay", () => {
+		this.addRibbonIcon("satellite", "Pictureframes Relay", () => {
 			this.openSettings();
 		});
 
@@ -669,6 +673,13 @@ export default class Live extends Plugin {
 			name: "Show releases",
 			callback: () => {
 				this.openReleaseManager();
+			},
+		});
+		this.addCommand({
+			id: "mirror-pull-now",
+			name: "Mirror: pull now",
+			callback: () => {
+				void this.mirrorSync?.pull("manual");
 			},
 		});
 		this.addCommand({
@@ -736,8 +747,13 @@ export default class Live extends Plugin {
 		this.addCommand({
 			id: "configure-endpoints",
 			name: "Configure enterprise tenant",
-			callback: () => {
-				this.openEndpointConfigurationModal();
+			// Operator-only: server administration happens server-side for friends.
+			checkCallback: (checking) => {
+				if (!isOperatorEmail(this.loginManager?.user?.email)) return false;
+				if (!checking) {
+					this.openEndpointConfigurationModal();
+				}
+				return true;
 			},
 		});
 
@@ -763,17 +779,22 @@ export default class Live extends Plugin {
 		this.addCommand({
 			id: "register-host",
 			name: "Register self-hosted server",
-			callback: () => {
-				const modal = new SelfHostModal(
-					this.app,
-					this.relayManager,
-					(relay) => {
-						// Open relay settings after successful creation
-						this.openSettings(`/relays?id=${relay.id}`);
-					},
-				);
-				this.openModals.push(modal);
-				modal.open();
+			// Operator-only: server administration happens server-side for friends.
+			checkCallback: (checking) => {
+				if (!isOperatorEmail(this.loginManager?.user?.email)) return false;
+				if (!checking) {
+					const modal = new SelfHostModal(
+						this.app,
+						this.relayManager,
+						(relay) => {
+							// Open relay settings after successful creation
+							this.openSettings(`/relays?id=${relay.id}`);
+						},
+					);
+					this.openModals.push(modal);
+					modal.open();
+				}
+				return true;
 			},
 		});
 
@@ -818,6 +839,13 @@ export default class Live extends Plugin {
 			endpointManager,
 		);
 		this.relayManager = new RelayManager(this.loginManager);
+		// Woolly fork: one-way mirror of the hub's read-only rooms. Started
+		// in the layout-ready block below; no folder-name logic client-side.
+		this.mirrorSync = new MirrorSync(
+			this,
+			this.loginManager,
+			endpointManager.getAuthUrl(),
+		);
 		this.relayDebugAPI = new RelayDebugAPI(this);
 		this.deviceManager = new DeviceManager(
 			this.appId,
@@ -894,7 +922,7 @@ export default class Live extends Plugin {
 		);
 
 		if (!this.loginManager.setup()) {
-			new Notice("Please sign in to use relay");
+			new Notice("Please sign in to use Pictureframes Relay");
 		}
 
 		this.app.workspace.onLayoutReady(() => {
@@ -921,6 +949,102 @@ export default class Live extends Plugin {
 			this.textViewRegistry.load();
 
 			this.sharedFolders.load();
+
+			this.mirrorSync?.start();
+
+			// Auto-mount: every remote folder this user can see lands under the
+			// Pictureframes root without interaction. Once-per-guid tombstones
+			// (localStorage, per vault) ensure a deliberate unmount stays unmounted.
+			{
+				const autoMounted = new LocalStorage<boolean>(
+					`${this.appId}-${this.manifest.id}/autoMounted`,
+				);
+				let autoMountQueued = false;
+				const autoMountPass = async () => {
+					if (!this.loginManager.loggedIn) return;
+					const remotes = [
+						...this.relayManager.remoteFolders.values(),
+					];
+					// Revocation sweep: a folder we auto-mounted whose access
+					// disappeared (while other remotes are still visible, so
+					// this isn't just a logout/startup blank) leaves the vault
+					// — into Obsidian's trash, recoverable. Clearing the
+					// tombstone means a re-grant later mounts it again.
+					if (remotes.length > 0) {
+						for (const guid of [...autoMounted.keys()]) {
+							if (remotes.some((r) => r.guid === guid)) continue;
+							const mounted = this.sharedFolders.find(
+								(f) => f.guid === guid,
+							);
+							if (mounted) {
+								const tfolder = this.app.vault.getFolderByPath(
+									mounted.path,
+								);
+								this.sharedFolders.delete(mounted);
+								if (tfolder) {
+									await this.app.vault.trash(tfolder, false);
+								}
+							}
+							autoMounted.delete(guid);
+						}
+					}
+					const candidates = [
+						...this.relayManager.remoteFolders.values(),
+					].filter(
+						(remote) =>
+							!autoMounted.has(remote.guid) &&
+							!this.sharedFolders.find((f) => f.guid === remote.guid) &&
+							!this.settings
+								.get()
+								.sharedFolders.some((s) => s.guid === remote.guid),
+					);
+					if (candidates.length === 0) return;
+					for (const remote of candidates) {
+						try {
+							autoMounted.set(remote.guid, true);
+							let path = normalizePath(remote.name);
+							if (this.app.vault.getFolderByPath(path) !== null) {
+								path = normalizePath(
+									`${remote.name} (${remote.guid.slice(0, 8)})`,
+								);
+							}
+							// Create every missing ancestor: folder names may
+							// nest (e.g. "Library/Gene Keys").
+							const segs = path.split("/");
+							let acc = "";
+							for (const seg of segs) {
+								acc = acc ? acc + "/" + seg : seg;
+								if (this.app.vault.getFolderByPath(acc) === null) {
+									await this.app.vault.createFolder(acc);
+								}
+							}
+							const folder = this.sharedFolders.clone(
+								path,
+								remote.guid,
+								remote.relay.guid,
+							);
+							folder.remote = remote;
+							this.sharedFolders.notifyListeners();
+						} catch (e) {
+							// Relay relation may not be ingested yet; clear the
+							// tombstone so the next notification retries.
+							autoMounted.delete(remote.guid);
+						}
+					}
+				};
+				const unsubAutoMount = this.relayManager.remoteFolders.subscribe(
+					() => {
+						if (autoMountQueued) return;
+						autoMountQueued = true;
+						setTimeout(() => {
+							autoMountQueued = false;
+							autoMountPass();
+						}, 2000);
+					},
+				);
+				this.register(unsubAutoMount);
+			}
+
 			this._liveViews = new LiveViewManager(
 				this.app,
 				this.sharedFolders,
@@ -1207,7 +1331,7 @@ export default class Live extends Plugin {
 			this.app as typeof this.app & { setting: SettingsController }
 		).setting;
 		await setting.open();
-		await setting.openTabById("system3-relay");
+		await setting.openTabById("pictureframes-relay");
 		this.settingsTab.navigateTo(path);
 	}
 
@@ -1800,7 +1924,7 @@ export default class Live extends Plugin {
 		} else {
 			const appAny = this.app as any;
 			const appCommands = appAny.commands;
-			const qualifiedCommand = `system3-relay:${command}`;
+			const qualifiedCommand = `pictureframes-relay:${command}`;
 			if (
 				// eslint-disable-next-line no-prototype-builtins -- Obsidian's command registry owns its command entries.
 				appCommands.commands.hasOwnProperty(qualifiedCommand) ||
@@ -1890,6 +2014,11 @@ export default class Live extends Plugin {
 			this.textViewRegistry?.destroy();
 		});
 		this.textViewRegistry = null as any;
+
+		teardownStep("mirrorSync.destroy", () => {
+			this.mirrorSync?.destroy();
+		});
+		this.mirrorSync = null;
 
 		teardownStep("relayManager.destroy", () => {
 			this.relayManager?.destroy();

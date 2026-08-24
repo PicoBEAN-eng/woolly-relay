@@ -34,8 +34,8 @@ export interface ApiV0 {
 }
 
 /**
- * Resolve this object again from `app.plugins.plugins["system3-relay"]?.api`
- * whenever `system3-relay:api-ready` fires. Calls through an object retained
+ * Resolve this object again from `app.plugins.plugins["pictureframes-relay"]?.api`
+ * whenever `pictureframes-relay:api-ready` fires. Calls through an object retained
  * past Relay's unload throw a terminal lifecycle error. Across Relay absence,
  * consumers retain their last-known state and reconcile it from fresh
  * snapshots at the next readiness signal.
@@ -46,19 +46,19 @@ export interface Api {
 
 declare module "obsidian" {
 	interface Workspace {
-		on(name: "system3-relay:api-ready", callback: () => void): EventRef;
-		trigger(name: "system3-relay:api-ready"): void;
+		on(name: "pictureframes-relay:api-ready", callback: () => void): EventRef;
+		trigger(name: "pictureframes-relay:api-ready"): void;
 		on(
-			name: "system3-relay:v0:users",
+			name: "pictureframes-relay:v0:users",
 			callback: (event: RelayEvent<User>) => void,
 		): EventRef;
-		trigger(name: "system3-relay:v0:users", event: RelayEvent<User>): void;
+		trigger(name: "pictureframes-relay:v0:users", event: RelayEvent<User>): void;
 		on(
-			name: "system3-relay:v0:current-user",
+			name: "pictureframes-relay:v0:current-user",
 			callback: (event: RelayEvent<User | null>) => void,
 		): EventRef;
 		trigger(
-			name: "system3-relay:v0:current-user",
+			name: "pictureframes-relay:v0:current-user",
 			event: RelayEvent<User | null>,
 		): void;
 	}
