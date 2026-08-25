@@ -112,6 +112,25 @@ export class MirrorSync {
 			.some((s) => s === "" || s === "." || s === ".." || s.startsWith("."));
 	}
 
+	// After deleting a mirrored file, retire now-empty ancestor folders —
+	// without this, folders that empty out hub-side (the renaming heartbeat
+	// folder, archived-away Generated Orders) pile up as husks on devices.
+	private async pruneEmptyParents(path: string) {
+		const segs = path.split("/");
+		segs.pop();
+		while (segs.length > 0) {
+			const dir = normalizePath(segs.join("/"));
+			try {
+				const listing = await this.adapter.list(dir);
+				if (listing.files.length > 0 || listing.folders.length > 0) return;
+				await this.adapter.rmdir(dir, false);
+			} catch {
+				return;
+			}
+			segs.pop();
+		}
+	}
+
 	private async ensureParent(path: string) {
 		const segs = path.split("/");
 		segs.pop();
@@ -231,6 +250,7 @@ export class MirrorSync {
 					if (await this.adapter.exists(norm)) {
 						await this.adapter.remove(norm);
 					}
+					await this.pruneEmptyParents(path);
 				} catch (e) {
 					console.warn("[mirror] delete failed", path, e);
 				}
