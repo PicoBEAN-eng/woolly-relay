@@ -1,6 +1,6 @@
 "use strict";
 
-import { Notice, normalizePath, requestUrl } from "obsidian";
+import { Notice, normalizePath, requestUrl, TFile } from "obsidian";
 import type Live from "./main";
 import type { LoginManager } from "./LoginManager";
 
@@ -48,6 +48,9 @@ export class MirrorSync {
 	// hub's folder-rename heartbeat, which no sync fabric can carry).
 	lastOkAt: number | null = null;
 	lastError: string | null = null;
+	// Conditional requests: the hub 304s unchanged manifests (~1.2MB saved
+	// per steady-state poll). In-memory only — a fresh session revalidates.
+	private manifestETag: string | null = null;
 
 	constructor(plugin: Live, loginManager: LoginManager, baseUrl: string) {
 		this.plugin = plugin;
@@ -115,6 +118,9 @@ export class MirrorSync {
 	// After deleting a mirrored file, retire now-empty ancestor folders —
 	// without this, folders that empty out hub-side (the renaming heartbeat
 	// folder, archived-away Generated Orders) pile up as husks on devices.
+	// Deletion goes through the Vault layer when the folder is indexed (so
+	// the index stays truthful) and falls back to the adapter; every failure
+	// path LOGS — the 0.2.2 silent catch hid the desktop husk bug entirely.
 	private async pruneEmptyParents(path: string) {
 		const segs = path.split("/");
 		segs.pop();
@@ -122,27 +128,44 @@ export class MirrorSync {
 			const dir = normalizePath(segs.join("/"));
 			try {
 				const listing = await this.adapter.list(dir);
-				if (listing.files.length > 0 || listing.folders.length > 0) return;
-				await this.adapter.rmdir(dir, false);
-			} catch {
+				if (listing.files.length > 0 || listing.folders.length > 0) {
+					console.log(
+						`[mirror] prune stop — ${dir} not empty:`,
+						listing.files.slice(0, 3),
+						listing.folders.slice(0, 3),
+					);
+					return;
+				}
+				const tfolder = this.plugin.app.vault.getFolderByPath(dir);
+				if (tfolder) {
+					await this.plugin.app.vault.delete(tfolder, true);
+				} else {
+					await this.adapter.rmdir(dir, false);
+				}
+				console.log(`[mirror] pruned empty folder ${dir}`);
+			} catch (e) {
+				console.warn(`[mirror] prune failed at ${dir}`, e);
 				return;
 			}
 			segs.pop();
 		}
 	}
 
+	// Create missing ancestors through the Vault API so they're indexed;
+	// adapter fallback for the index-orphan edge.
 	private async ensureParent(path: string) {
 		const segs = path.split("/");
 		segs.pop();
 		let acc = "";
 		for (const seg of segs) {
 			acc = acc ? `${acc}/${seg}` : seg;
-			if (!(await this.adapter.exists(acc))) {
-				try {
-					await this.adapter.mkdir(acc);
-				} catch {
-					/* concurrent create */
-				}
+			const norm = normalizePath(acc);
+			if (this.plugin.app.vault.getFolderByPath(norm)) continue;
+			if (await this.adapter.exists(norm)) continue; // on disk, index lagging
+			try {
+				await this.plugin.app.vault.createFolder(norm);
+			} catch {
+				/* concurrent create */
 			}
 		}
 	}
@@ -157,8 +180,21 @@ export class MirrorSync {
 		if (res.status !== 200) {
 			throw new Error(`blob ${hash.slice(0, 8)} for ${path}: ${res.status}`);
 		}
-		await this.ensureParent(path);
-		await this.adapter.writeBinary(normalizePath(path), res.arrayBuffer);
+		// Vault-layer writes so the metadata cache indexes mirror files at
+		// write time — adapter-only writes left links to them "unresolved"
+		// until a restart rescan (seen on the pilot fleet, 2026-08-25).
+		const norm = normalizePath(path);
+		const existing = this.plugin.app.vault.getAbstractFileByPath(norm);
+		if (existing instanceof TFile) {
+			await this.plugin.app.vault.modifyBinary(existing, res.arrayBuffer);
+		} else if (await this.adapter.exists(norm)) {
+			// On disk but not indexed (adapter-written by an older version):
+			// raw write keeps content right; the restart rescan indexes it.
+			await this.adapter.writeBinary(norm, res.arrayBuffer);
+		} else {
+			await this.ensureParent(path);
+			await this.plugin.app.vault.createBinary(norm, res.arrayBuffer);
+		}
 		this.state.files[path] = hash;
 		return true;
 	}
@@ -170,16 +206,26 @@ export class MirrorSync {
 		this.pulling = true;
 		try {
 			if (!this.stateLoaded) await this.loadState();
+			const headers: Record<string, string> = { Authorization: auth };
+			if (this.manifestETag) headers["If-None-Match"] = this.manifestETag;
 			const res = await requestUrl({
 				url: `${this.baseUrl}/mirror/manifest`,
-				headers: { Authorization: auth },
+				headers,
 				throw: false,
 			});
+			if (res.status === 304) {
+				// Unchanged manifest — still a heartbeat: hub reachable + authed.
+				this.lastOkAt = Date.now();
+				this.lastError = null;
+				return;
+			}
 			if (res.status !== 200) {
 				this.lastError = `manifest ${res.status}`;
 				console.warn(`[mirror] manifest ${res.status} (${reason})`);
 				return;
 			}
+			this.manifestETag =
+				res.headers?.["etag"] ?? res.headers?.["ETag"] ?? null;
 			const manifest = res.json as Manifest;
 			if (!manifest || manifest.v !== 1 || !manifest.files) return;
 			// A good manifest IS the heartbeat: hub reachable + authed,
@@ -247,7 +293,12 @@ export class MirrorSync {
 			for (const path of toDelete) {
 				try {
 					const norm = normalizePath(path);
-					if (await this.adapter.exists(norm)) {
+					// Vault-layer delete keeps the index truthful; adapter
+					// fallback for index-orphaned files.
+					const af = this.plugin.app.vault.getAbstractFileByPath(norm);
+					if (af instanceof TFile) {
+						await this.plugin.app.vault.delete(af);
+					} else if (await this.adapter.exists(norm)) {
 						await this.adapter.remove(norm);
 					}
 					await this.pruneEmptyParents(path);
