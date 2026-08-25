@@ -44,6 +44,10 @@ export class MirrorSync {
 	private stateLoaded = false;
 	private pulling = false;
 	private destroyed = false;
+	// Heartbeat: the device-truthful freshness signal (successor to the
+	// hub's folder-rename heartbeat, which no sync fabric can carry).
+	lastOkAt: number | null = null;
+	lastError: string | null = null;
 
 	constructor(plugin: Live, loginManager: LoginManager, baseUrl: string) {
 		this.plugin = plugin;
@@ -153,11 +157,16 @@ export class MirrorSync {
 				throw: false,
 			});
 			if (res.status !== 200) {
+				this.lastError = `manifest ${res.status}`;
 				console.warn(`[mirror] manifest ${res.status} (${reason})`);
 				return;
 			}
 			const manifest = res.json as Manifest;
 			if (!manifest || manifest.v !== 1 || !manifest.files) return;
+			// A good manifest IS the heartbeat: hub reachable + authed,
+			// even when there's nothing new to pull.
+			this.lastOkAt = Date.now();
+			this.lastError = null;
 
 			const wanted = Object.entries(manifest.files).filter(([p]) =>
 				this.safePath(p),
@@ -243,9 +252,36 @@ export class MirrorSync {
 			}
 		} catch (e) {
 			// offline or tunnel down: quiet — the interval retries.
+			this.lastError = e instanceof Error ? e.message : String(e);
 			console.warn(`[mirror] pull failed (${reason})`, e);
 		} finally {
 			this.pulling = false;
 		}
+	}
+
+	// One-line status for the status bar. Freshness thresholds sit just
+	// above the pull cadence: <7 min = healthy, beyond that = stale.
+	statusLine(): string {
+		if (this.pulling) return "Woolly ⟳ syncing";
+		if (!this.loginManager.loggedIn) return "Woolly — signed out";
+		if (this.lastOkAt === null) {
+			return this.lastError ? `Woolly ✗ ${this.lastError}` : "Woolly …";
+		}
+		const mins = Math.round((Date.now() - this.lastOkAt) / 60_000);
+		const age = mins < 1 ? "now" : `${mins}m`;
+		if (this.lastError) return `Woolly ✗ ${age} (${this.lastError})`;
+		return mins >= 7 ? `Woolly ⚠ ${age}` : `Woolly ✓ ${age}`;
+	}
+
+	statusDetail(): string {
+		const files = Object.keys(this.state.files).length;
+		const last = this.lastOkAt
+			? new Date(this.lastOkAt).toLocaleTimeString()
+			: "never";
+		return (
+			`Woolly mirror — ${files} files tracked\n` +
+			`Last successful pull: ${last}` +
+			(this.lastError ? `\nLast error: ${this.lastError}` : "")
+		);
 	}
 }

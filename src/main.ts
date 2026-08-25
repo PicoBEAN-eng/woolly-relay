@@ -683,6 +683,16 @@ export default class Live extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "mirror-status",
+			name: "Mirror: status",
+			callback: () => {
+				new Notice(
+					this.mirrorSync?.statusDetail() ?? "Mirror not running",
+					8000,
+				);
+			},
+		});
+		this.addCommand({
 			id: "send-bug-report",
 			name: "Send bug report",
 			callback: () => {
@@ -951,6 +961,21 @@ export default class Live extends Plugin {
 			this.sharedFolders.load();
 
 			this.mirrorSync?.start();
+
+			// Heartbeat: status-bar freshness from the mirror's last pull
+			// (device-truthful — replaces the hub's folder-rename heartbeat,
+			// which no sync fabric can carry). Hidden on mobile by Obsidian;
+			// the "Mirror: status" command covers phones/tablets.
+			{
+				const statusEl = this.addStatusBarItem();
+				const refresh = () => {
+					statusEl.setText(this.mirrorSync?.statusLine() ?? "");
+				};
+				refresh();
+				this.registerInterval(
+					window.setInterval(refresh, 30_000),
+				);
+			}
 
 			// Auto-mount: every remote folder this user can see lands under the
 			// Pictureframes root without interaction. Once-per-guid tombstones
