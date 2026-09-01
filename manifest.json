@@ -1,7 +1,7 @@
 {
   "id": "pictureframes-relay",
   "name": "Woolly Workplace Relay",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "minAppVersion": "1.6.6",
   "description": "Shared folders for the Woolly Workplace. Sign in with Google and your folders appear.",
   "author": "PicoBEAN-eng (fork of Relay by System 3, MIT)",
