@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 # Publish a new plugin release to GitHub for BRAT distribution.
 # Usage: ./release.sh <version>   (e.g. ./release.sh 0.7.13)
-# Expects a fresh build in ~/projects/Relay (main.js/manifest.json/styles.css).
+# Expects a fresh build in ~/projects/Relay (main.js/manifest.json/styles.css),
+# built with `npm run release` under the env in build.env — WITHOUT those vars
+# esbuild bakes upstream System 3 URLs and the plugin talks to the wrong
+# backend entirely (releases 0.2.4/0.2.5 shipped that way; every device that
+# updated silently lost the hub). The guard below refuses such a build.
 set -euo pipefail
 V="${1:?usage: release.sh <version>}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 T=$(cat ~/.config/relay-server/github-token)
 REPO="PicoBEAN-eng/woolly-relay"
+
+grep -q "woolly.08d5743r4qj3w.com" ~/projects/Relay/main.js ||
+  { echo "REFUSED: main.js has no woolly hub URL — rebuild with build.env (see that file)"; exit 1; }
+grep -qE "api\.system3\.md|auth\.system3\.md" ~/projects/Relay/main.js &&
+  { echo "REFUSED: main.js points at upstream System 3 — rebuild with build.env"; exit 1; }
 
 cp ~/projects/Relay/{main.js,styles.css} "$DIR/"
 # stamp the version into the manifest
